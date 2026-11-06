@@ -1,0 +1,12 @@
+---
+description: Regras do Contador de votos — leia ao editar este repositório
+alwaysApply: true
+---
+
+Leia `docs/ai/` (architecture, conventions, workflows) e `AGENTS.md`.
+
+- Depois de editar `extensao/collector.js`, `extensao/counter.js` ou `safari/overlay.js`, rode `python3 scripts/build-safari.py`.
+- Não commitar sessionid, cookies, CSV de resultados reais ou `.DS_Store`.
+- Handles padrão e demo: `@nova`, `@pulse`, `@orbit`.
+- UI em português, sem falar de Python/terminal para quem só conta votos.
+- Mensagens internas: `contador-ig` e `contador-ext`. Prefixo `scripta` está aposentado.

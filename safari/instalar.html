@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Instalar no Safari — Contador de votos</title>
+    <style>
+      :root {
+        --bg: #12110f;
+        --card: #1c1a17;
+        --line: #342f28;
+        --text: #f4efe6;
+        --muted: #9c9488;
+        --gold: #e2b657;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(1000px 420px at 12% -8%, #2a2418 0%, transparent 55%), var(--bg);
+        color: var(--text);
+      }
+      main {
+        width: min(640px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 48px 0 80px;
+      }
+      .eyebrow {
+        color: var(--gold);
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 8px 0 12px;
+        font-size: clamp(2rem, 6vw, 2.8rem);
+        letter-spacing: -0.04em;
+      }
+      p { color: var(--muted); line-height: 1.5; }
+      .card {
+        margin-top: 28px;
+        padding: 22px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+      }
+      ol { margin: 0; padding-left: 1.2em; color: var(--text); line-height: 1.7; }
+      .drag-wrap { display: flex; justify-content: center; margin: 22px 0 8px; }
+      #atalho {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 220px;
+        height: 52px;
+        padding: 0 22px;
+        border-radius: 14px;
+        background: var(--gold);
+        color: #1a1408;
+        font-weight: 800;
+        text-decoration: none;
+        cursor: grab;
+      }
+      #atalho.erro { background: #5a4030; color: #f4efe6; }
+      .hint { text-align: center; font-size: 0.9rem; }
+      .ghost {
+        display: block;
+        width: 100%;
+        margin-top: 12px;
+        height: 42px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      kbd {
+        padding: 1px 6px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #12110f;
+        font-size: 0.85em;
+      }
+      #bundle { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Safari</p>
+      <h1>Instalar o contador</h1>
+      <p>
+        Arraste o botão para a barra de Favoritos. Depois, no post do Instagram,
+        clique nele para abrir o placar.
+      </p>
+
+      <div class="card">
+        <ol>
+          <li>Se já existir um favorito <strong>Contar votos</strong>, apague-o</li>
+          <li>Mostre a barra de Favoritos: <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></li>
+          <li>Arraste o botão amarelo para essa barra (não clique nele aqui)</li>
+          <li>Abra o post do Instagram no Safari, já logado</li>
+          <li>Clique em <strong>Contar votos</strong> nos Favoritos</li>
+        </ol>
+        <div class="drag-wrap">
+          <a id="atalho" href="#">Contar votos</a>
+        </div>
+        <p class="hint" id="estado">Preparando o botão…</p>
+        <button class="ghost" id="copiar" type="button">Copiar atalho</button>
+      </div>
+    </main>
+    <textarea id="bundle">(() =&gt; {
+  if (window.__contadorCollectorReady) return;
+  window.__contadorCollectorReady = true;
+
+  const APP_ID = &quot;936619743392459&quot;;
+  const ALPHABET = &quot;ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_&quot;;
+
+  const sleep = (ms) =&gt; new Promise((resolve) =&gt; setTimeout(resolve, ms));
+
+  function emit(payload) {
+    window.postMessage({ source: &quot;contador-ig&quot;, ...payload }, &quot;*&quot;);
+  }
+
+  function shortcodeFromLocation() {
+    const match = String(location.pathname || &quot;&quot;).match(
+      /\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/
+    );
+    return match ? match[1] : null;
+  }
+
+  function shortcodeToMediaId(shortcode) {
+    let mediaId = 0n;
+    for (const ch of shortcode) {
+      const idx = ALPHABET.indexOf(ch);
+      if (idx &lt; 0) throw new Error(&quot;Link do Instagram inválido.&quot;);
+      mediaId = mediaId * 64n + BigInt(idx);
+    }
+    return mediaId.toString();
+  }
+
+  async function igFetch(url) {
+    const resp = await fetch(url, {
+      credentials: &quot;include&quot;,
+      headers: {
+        &quot;x-ig-app-id&quot;: APP_ID,
+        &quot;x-requested-with&quot;: &quot;XMLHttpRequest&quot;,
+      },
+    });
+    const text = await resp.text();
+    if (!resp.ok) {
+      if (resp.status === 401 || resp.status === 403) throw new Error(&quot;LOGIN&quot;);
+      throw new Error(`Instagram respondeu HTTP ${resp.status}.`);
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (/login|log in/i.test(text)) throw new Error(&quot;LOGIN&quot;);
+      throw new Error(&quot;Resposta inesperada do Instagram.&quot;);
+    }
+  }
+
+  function pushComment(comentarios, vistos, item, isReply) {
+    const cid = String(item.pk || item.id || &quot;&quot;);
+    if (!cid || vistos.has(cid)) return false;
+    vistos.add(cid);
+    comentarios.push({
+      id: cid,
+      username: (item.user?.username || &quot;desconhecido&quot;).toLowerCase(),
+      text: item.text || &quot;&quot;,
+      is_reply: Boolean(isReply),
+    });
+    return true;
+  }
+
+  async function coletarRespostas(mediaId, commentId, vistos, comentarios) {
+    let maxId = null;
+    let novos = 0;
+
+    for (let pagina = 0; pagina &lt; 50; pagina++) {
+      const params = new URLSearchParams();
+      if (maxId) params.set(&quot;max_id&quot;, maxId);
+      const qs = params.toString();
+      const url = `https://www.instagram.com/api/v1/media/${mediaId}/comments/${commentId}/inline_child_comments/${qs ? `?${qs}` : &quot;&quot;}`;
+
+      let data;
+      try {
+        data = await igFetch(url);
+      } catch {
+        break;
+      }
+
+      for (const item of data.child_comments || []) {
+        if (pushComment(comentarios, vistos, item, true)) novos += 1;
+      }
+
+      const hasMore = data.has_more_tail_child_comments || data.has_more_head_child_comments;
+      const nextMax = data.next_max_child_cursor || data.next_min_child_cursor;
+      if (!hasMore || !nextMax || nextMax === maxId) break;
+      maxId = nextMax;
+      await sleep(350);
+    }
+
+    return novos;
+  }
+
+  async function collect({ shortcode, includeReplies, token, onProgress } = {}) {
+    const report = (payload) =&gt; {
+      emit(payload);
+      if (typeof onProgress === &quot;function&quot;) onProgress(payload);
+    };
+    const mediaId = shortcodeToMediaId(shortcode);
+    const comentarios = [];
+    const vistos = new Set();
+    let minId = null;
+    let maxId = null;
+    let emptyStreak = 0;
+
+    report({
+      type: &quot;PROGRESS&quot;,
+      token,
+      page: 0,
+      count: 0,
+      detail: &quot;Conectando ao Instagram…&quot;,
+    });
+
+    for (let pagina = 1; pagina &lt;= 200; pagina++) {
+      const params = new URLSearchParams({
+        can_support_threading: &quot;true&quot;,
+        permalink_enabled: &quot;false&quot;,
+      });
+      if (minId) params.set(&quot;min_id&quot;, minId);
+      else if (maxId) params.set(&quot;max_id&quot;, maxId);
+
+      const url = `https://www.instagram.com/api/v1/media/${mediaId}/comments/?${params}`;
+      const data = await igFetch(url);
+
+      if (data.status &amp;&amp; data.status !== &quot;ok&quot; &amp;&amp; !data.comments) {
+        const msg = String(data.message || &quot;&quot;);
+        if (/login|not authorized|please wait/i.test(msg)) throw new Error(&quot;LOGIN&quot;);
+        throw new Error(msg || &quot;O Instagram recusou a leitura dos comentários.&quot;);
+      }
+
+      const lista = data.comments || [];
+      let novos = 0;
+
+      for (const item of lista) {
+        if (pushComment(comentarios, vistos, item, false)) novos += 1;
+
+        if (!includeReplies) continue;
+
+        const preview = item.preview_child_comments || [];
+        for (const child of preview) {
+          if (pushComment(comentarios, vistos, child, true)) novos += 1;
+        }
+
+        const cid = String(item.pk || item.id || &quot;&quot;);
+        const childCount = Number(item.child_comment_count || 0);
+        if (cid &amp;&amp; childCount &gt; preview.length) {
+          novos += await coletarRespostas(mediaId, cid, vistos, comentarios);
+        }
+      }
+
+      report({
+        type: &quot;PROGRESS&quot;,
+        token,
+        page: pagina,
+        count: comentarios.length,
+        detail: `Página ${pagina}: ${comentarios.length} comentários coletados…`,
+      });
+
+      const nextMin = data.next_min_id;
+      const nextMax = data.next_max_id;
+
+      let advanced = false;
+      if (nextMin &amp;&amp; nextMin !== minId) {
+        minId = nextMin;
+        maxId = null;
+        advanced = true;
+      } else if (nextMax &amp;&amp; nextMax !== maxId) {
+        maxId = nextMax;
+        minId = null;
+        advanced = true;
+      }
+
+      if (!advanced) break;
+      if (novos === 0) {
+        emptyStreak += 1;
+        if (emptyStreak &gt;= 2) break;
+      } else {
+        emptyStreak = 0;
+      }
+
+      await sleep(450);
+    }
+
+    report({ type: &quot;DONE&quot;, token, comments: comentarios });
+    return comentarios;
+  }
+
+  window.ContadorCollector = { collect, shortcodeFromLocation };
+
+  window.addEventListener(&quot;message&quot;, (event) =&gt; {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (!data || data.source !== &quot;contador-ext&quot; || data.type !== &quot;START&quot;) return;
+
+    collect(data.payload).catch((err) =&gt; {
+      const login = err &amp;&amp; err.message === &quot;LOGIN&quot;;
+      emit({
+        type: &quot;ERROR&quot;,
+        token: data.payload?.token,
+        login,
+        message: login
+          ? &quot;Faça login no Instagram neste navegador e tente de novo.&quot;
+          : (err &amp;&amp; err.message) || &quot;Falha ao coletar comentários.&quot;,
+      });
+    });
+  });
+})();
+
+(function (root) {
+  const DJS_PADRAO = [&quot;@nova&quot;, &quot;@pulse&quot;, &quot;@orbit&quot;];
+
+  function normalizarHandle(handle) {
+    let limpo = String(handle || &quot;&quot;)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, &quot;&quot;);
+    if (!limpo) return &quot;&quot;;
+    if (!limpo.startsWith(&quot;@&quot;)) limpo = &quot;@&quot; + limpo;
+    limpo = &quot;@&quot; + limpo.slice(1).replace(/[^a-z0-9._]/g, &quot;&quot;);
+    if (limpo.length &lt; 3) return &quot;&quot;;
+    return limpo;
+  }
+
+  function escapeRegex(texto) {
+    return texto.replace(/[.*+?^${}()|[\]\\]/g, &quot;\\$&amp;&quot;);
+  }
+
+  function contabilizarVotos(comentarios, djs, opcoes) {
+    const ignorarAutoVoto = Boolean(opcoes &amp;&amp; opcoes.ignorarAutoVoto);
+    const djsNorm = [];
+    const vistos = new Set();
+    for (const dj of djs) {
+      const n = normalizarHandle(dj);
+      if (!n || vistos.has(n)) continue;
+      vistos.add(n);
+      djsNorm.push(n);
+    }
+
+    const stats = {};
+    const padroes = {};
+    for (const dj of djsNorm) {
+      stats[dj] = {
+        handle: dj,
+        usuariosUnicos: new Set(),
+        usuariosExclusivos: new Set(),
+        comentariosComMencao: 0,
+        totalOcorrenciasArroba: 0,
+        contagemPorUsuario: {},
+      };
+      padroes[dj] = new RegExp(
+        `(?&lt;![a-zA-Z0-9._])@${escapeRegex(dj.slice(1))}(?![a-zA-Z0-9._])`,
+        &quot;gi&quot;
+      );
+    }
+
+    let total = 0;
+    let comVoto = 0;
+    const participantes = new Set();
+    const djsPorUsuario = new Map();
+
+    for (const com of comentarios || []) {
+      total += 1;
+      const usuario = String(com.username || &quot;&quot;)
+        .trim()
+        .replace(/^@+/, &quot;&quot;)
+        .toLowerCase();
+      const texto = com.text || com.texto || &quot;&quot;;
+      let votou = false;
+
+      for (const dj of djsNorm) {
+        const regex = padroes[dj];
+        regex.lastIndex = 0;
+        const matches = texto.match(regex);
+        if (!matches) continue;
+        if (ignorarAutoVoto &amp;&amp; usuario === dj.slice(1)) continue;
+
+        votou = true;
+        const est = stats[dj];
+        est.usuariosUnicos.add(usuario);
+        est.comentariosComMencao += 1;
+        est.totalOcorrenciasArroba += matches.length;
+        est.contagemPorUsuario[usuario] = (est.contagemPorUsuario[usuario] || 0) + 1;
+        participantes.add(usuario);
+        if (!djsPorUsuario.has(usuario)) djsPorUsuario.set(usuario, new Set());
+        djsPorUsuario.get(usuario).add(dj);
+      }
+
+      if (votou) comVoto += 1;
+    }
+
+    let multi = 0;
+    for (const [usuario, setDjs] of djsPorUsuario.entries()) {
+      if (setDjs.size === 1) {
+        stats[[...setDjs][0]].usuariosExclusivos.add(usuario);
+      } else if (setDjs.size &gt; 1) {
+        multi += 1;
+      }
+    }
+
+    return {
+      stats,
+      resumo: {
+        totalComentariosLidos: total,
+        comentariosComVotoValido: comVoto,
+        comentariosSemDj: total - comVoto,
+        totalUsuariosVotantes: participantes.size,
+        usuariosMultiVoto: multi,
+      },
+    };
+  }
+
+  function topApoiadores(est, n) {
+    return Object.entries(est.contagemPorUsuario)
+      .sort((a, b) =&gt; b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, n || 3);
+  }
+
+  function dadosDemo() {
+    const rows = [
+      [&quot;ana.beats&quot;, &quot;fecha com @nova&quot;],
+      [&quot;ana.beats&quot;, &quot;@nova sem dúvida&quot;],
+      [&quot;ana.beats&quot;, &quot;@nova @nova&quot;],
+      [&quot;leo.mix&quot;, &quot;Tem que ser @nova&quot;],
+      [&quot;sofia.k&quot;, &quot;@NOVA&quot;],
+      [&quot;sofia.k&quot;, &quot;meu voto: @nova&quot;],
+      [&quot;rafa&quot;, &quot;@nova&quot;],
+      [&quot;bia.fest&quot;, &quot;@pulse&quot;],
+      [&quot;bia.fest&quot;, &quot;@pulse toca muito&quot;],
+      [&quot;caio&quot;, &quot;@pulse&quot;],
+      [&quot;mari&quot;, &quot;@Pulse&quot;],
+      [&quot;joao.v&quot;, &quot;@pulse na line&quot;],
+      [&quot;nanda&quot;, &quot;@pulse&quot;],
+      [&quot;duda&quot;, &quot;@orbit&quot;],
+      [&quot;duda&quot;, &quot;@orbit&quot;],
+      [&quot;duda&quot;, &quot;@orbit&quot;],
+      [&quot;theo&quot;, &quot;@orbit&quot;],
+      [&quot;lara&quot;, &quot;@orbit até o fim&quot;],
+      [&quot;mix.user&quot;, &quot;quero @nova e @orbit&quot;],
+      [&quot;pergunta&quot;, &quot;que horas começa? @amigo&quot;],
+    ];
+    return rows.map((row, i) =&gt; ({
+      id: &quot;demo_&quot; + (i + 1),
+      username: row[0],
+      text: row[1],
+      is_reply: false,
+    }));
+  }
+
+  function extrairShortcode(urlOuCodigo) {
+    const texto = String(urlOuCodigo || &quot;&quot;).trim();
+    const match = texto.match(
+      /(?:instagram\.com|instagr\.am)\/(?:[A-Za-z0-9_.-]+\/)?(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i
+    );
+    if (match) return match[1];
+    if (/^[A-Za-z0-9_-]{8,15}$/.test(texto)) return texto;
+    return null;
+  }
+
+  root.ContadorContest = {
+    DJS_PADRAO,
+    normalizarHandle,
+    contabilizarVotos,
+    topApoiadores,
+    dadosDemo,
+    extrairShortcode,
+  };
+})(typeof window !== &quot;undefined&quot; ? window : globalThis);
+
+(() =&gt; {
+  const Col = window.ContadorCollector;
+  const C = window.ContadorContest;
+  if (!Col || !C) {
+    alert(&quot;Não consegui carregar o contador. Abra de novo o botão dos Favoritos.&quot;);
+    return;
+  }
+
+  const shortcode = Col.shortcodeFromLocation();
+  if (!shortcode) {
+    alert(&quot;Abra o post ou o reel no Instagram e clique de novo em Contar votos.&quot;);
+    return;
+  }
+
+  const KEY = &quot;contador.votos.djs&quot;;
+
+  function loadDjs() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEY) || &quot;[]&quot;);
+      if (Array.isArray(saved) &amp;&amp; saved.length) {
+        return saved.map(C.normalizarHandle).filter(Boolean);
+      }
+    } catch (_) {}
+    return [...C.DJS_PADRAO];
+  }
+
+  function saveDjs(djs) {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(djs));
+    } catch (_) {}
+  }
+
+  if (window.__contadorHost &amp;&amp; window.__contadorHost.isConnected) {
+    window.__contadorHost.style.display = &quot;block&quot;;
+    return;
+  }
+
+  const host = document.createElement(&quot;div&quot;);
+  host.setAttribute(&quot;data-contador&quot;, &quot;overlay&quot;);
+  host.style.all = &quot;initial&quot;;
+  host.style.position = &quot;fixed&quot;;
+  host.style.inset = &quot;0&quot;;
+  host.style.zIndex = &quot;2147483646&quot;;
+  host.style.pointerEvents = &quot;none&quot;;
+  const shadow = host.attachShadow({ mode: &quot;open&quot; });
+  document.documentElement.appendChild(host);
+  window.__contadorHost = host;
+
+  const css = `
+    :host { all: initial; }
+    * { box-sizing: border-box; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+    .scrim { position: fixed; inset: 0; background: rgba(8,7,6,.45); pointer-events: auto; }
+    .panel {
+      pointer-events: auto;
+      position: fixed; top: 16px; right: 16px;
+      width: min(440px, calc(100vw - 24px));
+      max-height: calc(100vh - 32px);
+      overflow: auto;
+      background: #1c1a17; color: #f4efe6;
+      border: 1px solid #342f28; border-radius: 18px;
+      box-shadow: 0 24px 60px rgba(0,0,0,.4);
+      padding: 16px;
+    }
+    h1 { margin: 0 8px 0 0; font-size: 1.15rem; letter-spacing: -.03em; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    button { font: inherit; cursor: pointer; }
+    .gold { height: 40px; padding: 0 14px; border: 0; border-radius: 10px; background: #e2b657; color: #1a1408; font-weight: 700; }
+    .gold:disabled { filter: saturate(.4); cursor: wait; }
+    .icon { width: 32px; height: 32px; border: 1px solid #342f28; background: transparent; color: #f4efe6; border-radius: 8px; }
+    .muted { color: #9c9488; font-size: .86rem; margin: 0 0 12px; }
+    .status { min-height: 1.2em; margin: 0 0 10px; font-size: .9rem; color: #9c9488; }
+    .status.erro { color: #e08b7a; }
+    .status.ok { color: #c8e2a8; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #24211c; border: 1px solid #342f28; font-size: .85rem; }
+    .chip button { border: 0; background: none; color: #9c9488; }
+    .row { display: flex; gap: 6px; margin-bottom: 8px; }
+    input[type=text] { flex: 1; height: 36px; border-radius: 8px; border: 1px solid #342f28; background: #12110f; color: #f4efe6; padding: 0 10px; }
+    .ghost { height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid #342f28; background: transparent; color: #f4efe6; }
+    .check { display: flex; align-items: center; gap: 6px; color: #9c9488; font-size: .85rem; margin: 4px 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { padding: 7px 4px; border-bottom: 1px solid #342f28; font-size: .82rem; text-align: left; }
+    th { color: #9c9488; font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .pos { color: #e2b657; font-weight: 700; }
+    .card { margin-top: 12px; padding-top: 10px; border-top: 1px solid #342f28; }
+    .card h2 { margin: 0; font-size: .95rem; }
+    .tops { margin: 8px 0 0; padding: 0; list-style: none; color: #9c9488; font-size: .82rem; }
+    .tops li { margin: 0 0 6px; }
+    .panel { width: min(480px, calc(100vw - 24px)); }
+  `;
+
+  shadow.innerHTML = `
+    &lt;style&gt;${css}&lt;/style&gt;
+    &lt;div class=&quot;scrim&quot; id=&quot;scrim&quot;&gt;&lt;/div&gt;
+    &lt;aside class=&quot;panel&quot; role=&quot;dialog&quot; aria-label=&quot;Contador de votos&quot;&gt;
+      &lt;div class=&quot;top&quot;&gt;
+        &lt;h1&gt;Contador de votos&lt;/h1&gt;
+        &lt;button class=&quot;icon&quot; id=&quot;fechar&quot; type=&quot;button&quot; aria-label=&quot;Fechar&quot;&gt;×&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;p class=&quot;muted&quot;&gt;Adicione os @ dos DJs e conte os votos deste post.&lt;/p&gt;
+      &lt;p class=&quot;status&quot; id=&quot;status&quot;&gt;&lt;/p&gt;
+      &lt;button class=&quot;gold&quot; id=&quot;contar&quot; type=&quot;button&quot;&gt;Contar votos&lt;/button&gt;
+      &lt;p class=&quot;muted&quot; style=&quot;margin-top:12px&quot;&gt;DJs do contest&lt;/p&gt;
+      &lt;div class=&quot;chips&quot; id=&quot;chips&quot;&gt;&lt;/div&gt;
+      &lt;div class=&quot;row&quot;&gt;
+        &lt;input id=&quot;novo&quot; type=&quot;text&quot; maxlength=&quot;32&quot; placeholder=&quot;@outro.dj&quot; /&gt;
+        &lt;button class=&quot;ghost&quot; id=&quot;add&quot; type=&quot;button&quot;&gt;Adicionar&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;label class=&quot;check&quot;&gt;&lt;input id=&quot;respostas&quot; type=&quot;checkbox&quot; checked /&gt; Incluir respostas&lt;/label&gt;
+      &lt;label class=&quot;check&quot;&gt;&lt;input id=&quot;auto&quot; type=&quot;checkbox&quot; /&gt; Ignorar auto-voto do DJ&lt;/label&gt;
+      &lt;div id=&quot;resultado&quot;&gt;&lt;/div&gt;
+    &lt;/aside&gt;
+  `;
+
+  const $ = (id) =&gt; shadow.getElementById(id);
+  const state = { djs: loadDjs(), last: null };
+
+  function setStatus(texto, tipo) {
+    const el = $(&quot;status&quot;);
+    el.textContent = texto || &quot;&quot;;
+    el.className = &quot;status&quot; + (tipo ? ` ${tipo}` : &quot;&quot;);
+  }
+
+  function renderChips() {
+    const box = $(&quot;chips&quot;);
+    box.replaceChildren();
+    state.djs.forEach((dj) =&gt; {
+      const chip = document.createElement(&quot;span&quot;);
+      chip.className = &quot;chip&quot;;
+      chip.append(dj);
+      const btn = document.createElement(&quot;button&quot;);
+      btn.type = &quot;button&quot;;
+      btn.textContent = &quot;×&quot;;
+      btn.addEventListener(&quot;click&quot;, () =&gt; {
+        state.djs = state.djs.filter((item) =&gt; item !== dj);
+        saveDjs(state.djs);
+        renderChips();
+      });
+      chip.append(btn);
+      box.append(chip);
+    });
+  }
+
+  function rankingUnicos(stats) {
+    return Object.values(stats).sort(
+      (a, b) =&gt;
+        b.usuariosUnicos.size - a.usuariosUnicos.size ||
+        b.usuariosExclusivos.size - a.usuariosExclusivos.size ||
+        a.handle.localeCompare(b.handle)
+    );
+  }
+
+  function rankingRepetidos(stats) {
+    return Object.values(stats).sort(
+      (a, b) =&gt;
+        b.comentariosComMencao - a.comentariosComMencao ||
+        b.totalOcorrenciasArroba - a.totalOcorrenciasArroba ||
+        a.handle.localeCompare(b.handle)
+    );
+  }
+
+  function medalha(idx) {
+    return [&quot;1º&quot;, &quot;2º&quot;, &quot;3º&quot;][idx] || `${idx + 1}º`;
+  }
+
+  function esc(texto) {
+    return String(texto)
+      .replaceAll(&quot;&amp;&quot;, &quot;&amp;amp;&quot;)
+      .replaceAll(&quot;&lt;&quot;, &quot;&amp;lt;&quot;)
+      .replaceAll(&quot;&gt;&quot;, &quot;&amp;gt;&quot;);
+  }
+
+  function renderResultado(stats, resumo) {
+    const unicos = rankingUnicos(stats);
+    const repetidos = rankingRepetidos(stats);
+    const somaU = unicos.reduce((a, i) =&gt; a + i.usuariosUnicos.size, 0);
+    const somaR = repetidos.reduce((a, i) =&gt; a + i.comentariosComMencao, 0);
+    const liderU = unicos[0]?.usuariosUnicos.size || 0;
+    const liderR = repetidos[0]?.comentariosComMencao || 0;
+
+    const linU = unicos
+      .map((item, idx) =&gt; {
+        const v = item.usuariosUnicos.size;
+        const pct = somaU ? ((v / somaU) * 100).toFixed(1) : &quot;0.0&quot;;
+        const dif = v === liderU ? (idx === 0 ? &quot;Líder&quot; : &quot;Empate&quot;) : `${v - liderU}`;
+        return `&lt;tr&gt;&lt;td class=&quot;pos&quot;&gt;${medalha(idx)}&lt;/td&gt;&lt;td&gt;${esc(item.handle)}&lt;/td&gt;&lt;td class=&quot;num&quot;&gt;${v}&lt;/td&gt;&lt;td class=&quot;num&quot;&gt;${item.usuariosExclusivos.size}&lt;/td&gt;&lt;td class=&quot;num&quot;&gt;${pct}%&lt;/td&gt;&lt;td class=&quot;num&quot;&gt;${dif}&lt;/td&gt;&lt;/tr&gt;`;
+      })
+      .join(&quot;&quot;);
+
+    const linR = repetidos
+      .map((item, idx) =&gt; {
+        const v = item.comentariosComMencao;
+        const pct = somaR ? ((v / somaR) * 100).toFixed(1) : &quot;0.0&quot;;
+        const dif = v === liderR ? (idx === 0 ? &quot;Líder&quot; : &quot;Empate&quot;) : `${v - liderR}`;
+        const media = item.usuariosUnicos.size
+          ? (item.comentariosComMencao / item.usuariosUnicos.size).toFixed(2)
+          : &quot;0.00&quot;;
+        return `&lt;tr&gt;&lt;td class=&quot;pos&quot;&gt;${medalha(idx)}&lt;/td&gt;&lt;td&gt;${esc(item.handle)}&lt;/td&gt;&lt;td class=&quot;num&quot;&gt;${v}&lt;/td&gt;&lt;td class=&quot;num&quot;&gt;${item.totalOcorrenciasArroba}&lt;/td&gt;&lt;td class=&quot;num&quot;&gt;${media}x&lt;/td&gt;&lt;td class=&quot;num&quot;&gt;${pct}%&lt;/td&gt;&lt;td class=&quot;num&quot;&gt;${dif}&lt;/td&gt;&lt;/tr&gt;`;
+      })
+      .join(&quot;&quot;);
+
+    const tops = repetidos
+      .map((item) =&gt; {
+        const lista = C.topApoiadores(item, 3);
+        const txt = lista.length
+          ? lista.map(([u, n]) =&gt; `@${u} (${n}x)`).join(&quot;, &quot;)
+          : &quot;nenhum voto&quot;;
+        return `&lt;li&gt;&lt;strong&gt;${esc(item.handle)}&lt;/strong&gt; — ${esc(txt)}&lt;/li&gt;`;
+      })
+      .join(&quot;&quot;);
+
+    $(&quot;resultado&quot;).innerHTML = `
+      &lt;div class=&quot;card&quot;&gt;
+        &lt;p class=&quot;muted&quot;&gt;${resumo.totalComentariosLidos} comentários · ${resumo.totalUsuariosVotantes} pessoas · ${resumo.usuariosMultiVoto} votaram em mais de um DJ&lt;/p&gt;
+        &lt;button class=&quot;ghost&quot; id=&quot;csv&quot; type=&quot;button&quot;&gt;Baixar CSV&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;card&quot;&gt;
+        &lt;h2&gt;Tabela 1 — Por pessoa&lt;/h2&gt;
+        &lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Pos&lt;/th&gt;&lt;th&gt;DJ&lt;/th&gt;&lt;th class=&quot;num&quot;&gt;Únicos&lt;/th&gt;&lt;th class=&quot;num&quot;&gt;Excl.&lt;/th&gt;&lt;th class=&quot;num&quot;&gt;%&lt;/th&gt;&lt;th class=&quot;num&quot;&gt;Dif.&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;${linU}&lt;/tbody&gt;&lt;/table&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;card&quot;&gt;
+        &lt;h2&gt;Tabela 2 — Todos os comentários&lt;/h2&gt;
+        &lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Pos&lt;/th&gt;&lt;th&gt;DJ&lt;/th&gt;&lt;th class=&quot;num&quot;&gt;Coment.&lt;/th&gt;&lt;th class=&quot;num&quot;&gt;@s&lt;/th&gt;&lt;th class=&quot;num&quot;&gt;Média&lt;/th&gt;&lt;th class=&quot;num&quot;&gt;%&lt;/th&gt;&lt;th class=&quot;num&quot;&gt;Dif.&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;${linR}&lt;/tbody&gt;&lt;/table&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;card&quot;&gt;
+        &lt;h2&gt;Quem mais comentou&lt;/h2&gt;
+        &lt;ul class=&quot;tops&quot;&gt;${tops}&lt;/ul&gt;
+      &lt;/div&gt;
+    `;
+    shadow.getElementById(&quot;csv&quot;).addEventListener(&quot;click&quot;, baixarCsv);
+  }
+
+  function baixarCsv() {
+    if (!state.last) return;
+    const linhas = [[&quot;DJ&quot;, &quot;Votos_Unicos_1_Por_Pessoa&quot;, &quot;Votos_Unicos_Exclusivos&quot;, &quot;Comentarios_Totais_Com_Repeticao&quot;, &quot;Total_Mencoes_Arroba&quot;]];
+    for (const item of rankingUnicos(state.last.stats)) {
+      linhas.push([
+        item.handle,
+        item.usuariosUnicos.size,
+        item.usuariosExclusivos.size,
+        item.comentariosComMencao,
+        item.totalOcorrenciasArroba,
+      ]);
+    }
+    const blob = new Blob([linhas.map((l) =&gt; l.join(&quot;,&quot;)).join(&quot;\n&quot;)], { type: &quot;text/csv&quot; });
+    const a = document.createElement(&quot;a&quot;);
+    a.href = URL.createObjectURL(blob);
+    a.download = &quot;resultado_contest.csv&quot;;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function contar() {
+    if (!state.djs.length) {
+      setStatus(&quot;Adicione pelo menos um @.&quot;, &quot;erro&quot;);
+      return;
+    }
+    const btn = $(&quot;contar&quot;);
+    btn.disabled = true;
+    setStatus(&quot;Coletando comentários…&quot;);
+    try {
+      const comentarios = await Col.collect({
+        shortcode,
+        includeReplies: $(&quot;respostas&quot;).checked,
+        token: String(Date.now()),
+        onProgress: (msg) =&gt; {
+          if (msg &amp;&amp; msg.detail) setStatus(msg.detail);
+        },
+      });
+      const { stats, resumo } = C.contabilizarVotos(comentarios, state.djs, {
+        ignorarAutoVoto: $(&quot;auto&quot;).checked,
+      });
+      state.last = { stats, resumo };
+      renderResultado(stats, resumo);
+      setStatus(`${resumo.totalComentariosLidos} comentários · ${resumo.totalUsuariosVotantes} pessoas votaram.`, &quot;ok&quot;);
+    } catch (err) {
+      const login = err &amp;&amp; err.message === &quot;LOGIN&quot;;
+      setStatus(
+        login
+          ? &quot;Faça login no Instagram e clique de novo.&quot;
+          : (err &amp;&amp; err.message) || &quot;Não consegui ler os comentários.&quot;,
+        &quot;erro&quot;
+      );
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  $(&quot;fechar&quot;).addEventListener(&quot;click&quot;, () =&gt; {
+    host.remove();
+    window.__contadorHost = null;
+  });
+  $(&quot;scrim&quot;).addEventListener(&quot;click&quot;, () =&gt; {
+    host.remove();
+    window.__contadorHost = null;
+  });
+  function adicionarDj() {
+    const handle = C.normalizarHandle($(&quot;novo&quot;).value);
+    if (!handle) return;
+    if (!state.djs.includes(handle)) state.djs.push(handle);
+    $(&quot;novo&quot;).value = &quot;&quot;;
+    saveDjs(state.djs);
+    renderChips();
+  }
+
+  $(&quot;add&quot;).addEventListener(&quot;click&quot;, adicionarDj);
+  $(&quot;novo&quot;).addEventListener(&quot;keydown&quot;, (event) =&gt; {
+    if (event.key === &quot;Enter&quot;) {
+      event.preventDefault();
+      adicionarDj();
+    }
+  });
+  $(&quot;contar&quot;).addEventListener(&quot;click&quot;, contar);
+  renderChips();
+  contar();
+})();
+</textarea>
+    <script>
+      (() => {
+        const atalho = document.getElementById("atalho");
+        const estado = document.getElementById("estado");
+        const copiar = document.getElementById("copiar");
+        const code = document.getElementById("bundle").value;
+        if (!code.trim()) {
+          atalho.classList.add("erro");
+          estado.textContent = "O contador não veio junto nesta página.";
+          return;
+        }
+        const b64 = btoa(unescape(encodeURIComponent(code)));
+        const loader =
+          "(function(){try{var c=decodeURIComponent(escape(atob(" +
+          JSON.stringify(b64) +
+          ')));var u=URL.createObjectURL(new Blob([c],{type:"text/javascript"}));var s=document.createElement("script");s.src=u;s.onload=function(){URL.revokeObjectURL(u)};s.onerror=function(){alert("O Instagram bloqueou o contador. Recarregue o post e tente de novo.")};(document.head||document.documentElement).appendChild(s)}catch(e){alert(String(e))}})()';
+        atalho.href = "javascript:" + encodeURIComponent(loader);
+        estado.textContent = "Pronto. Arraste o botão amarelo para os Favoritos.";
+        atalho.addEventListener("click", (event) => {
+          event.preventDefault();
+          estado.textContent = "Não clique aqui. Arraste o botão para os Favoritos e use no Instagram.";
+        });
+        copiar.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(atalho.href);
+            copiar.textContent = "Copiado. Crie um favorito e cole no campo do endereço.";
+          } catch (_) {
+            copiar.textContent = "Não copiou sozinho. Arraste o botão amarelo.";
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

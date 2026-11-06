@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Contador de votos</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <p class="eyebrow">Instagram · Contest</p>
+        <h1>Contador de votos</h1>
+        <p class="lede">
+          Cole o link do post, confirme os @ dos DJs e aperte contar. Use a mesma
+          conta já aberta neste navegador.
+        </p>
+      </header>
+
+      <section class="panel" aria-label="Formulário de contagem">
+        <label class="field-label" for="url">Link do post</label>
+        <div class="url-row">
+          <input
+            id="url"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="https://www.instagram.com/p/…"
+          />
+          <button id="contar" type="button">Contar votos</button>
+        </div>
+        <p id="status" class="status" role="status"></p>
+
+        <div class="config">
+          <div>
+            <p class="field-label">DJs do contest</p>
+            <div id="dj-list" class="chips"></div>
+            <div class="add-row">
+              <input id="dj-novo" type="text" maxlength="32" placeholder="@outro.dj" />
+              <button id="dj-add" type="button" class="ghost">Adicionar</button>
+            </div>
+          </div>
+          <div class="toggles">
+            <label class="check">
+              <input id="incluir-respostas" type="checkbox" checked />
+              Incluir respostas
+            </label>
+            <label class="check">
+              <input id="ignorar-auto" type="checkbox" />
+              Ignorar auto-voto do DJ
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section id="resultado" class="resultado" hidden></section>
+
+      <footer class="foot">
+        <button id="demo" type="button" class="linkish">Ver com dados de exemplo</button>
+      </footer>
+    </div>
+    <script src="counter.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
